@@ -28,7 +28,7 @@ database, and generates professional PDF reports with AI-powered analysis.
 
 ## Installation
 ```bash
-git clone https://github.com/yourusername/SecureScope
+git clone https://github.com/kushwahaj-ux/SecureScope
 cd SecureScope
 pip install -r requirements.txt
 ```

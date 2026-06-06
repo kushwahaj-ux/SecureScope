@@ -1,0 +1,29 @@
+.env
+*.db
+__pycache__/
+reports/
+*.pyc
+securescope.db
+pocs/
+bounty_reports/
+
+compliance_reports/
+# VS Code settings
+.vscode/
+
+# Log files
+*.log
+
+# Python virtual environment
+venv/
+env/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+test_*.py
+
+# Uploaded files
+uploads/

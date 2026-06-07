@@ -245,7 +245,7 @@ class ReportGenerator:
 if __name__ == "__main__":
     report = ReportGenerator()
     test_results = {
-        "target": "https://emedsmart.co",
+        "target": "https://example.com",
         "total": 2,
         "summary": "Security assessment completed. Two medium severity findings identified.",
         "web_findings": [

@@ -8,7 +8,7 @@ class AIAnalyzer:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             print("⚠️ WARNING: GEMINI_API_KEY not set!")
-        
+
         self.client = genai.Client(api_key=api_key)
         self.model_name = "gemini-2.5-flash"
         print("AI Analyzer Ready!")
@@ -22,7 +22,7 @@ class AIAnalyzer:
                 "immediate_fix": "N/A",
                 "business_impact": "N/A"
             }
-            
+
         prompt = f"""
 You are a senior penetration tester writing a security report.
 Analyze this finding and respond ONLY in valid JSON format.
@@ -49,9 +49,15 @@ Respond with exactly this JSON structure:
                 )
             )
             text = response.text.strip()
-            return json.loads(text)
-            
-        except json.JSONDecodeError:
+            # Strip markdown fences if present
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            return json.loads(text.strip())
+
+        except json.JSONDecodeError as e:
+            print(f"AI JSON parse error: {e}")
             return {
                 "plain_english": details,
                 "risk_level": severity,
@@ -72,14 +78,15 @@ Respond with exactly this JSON structure:
     def executive_summary(self, target, findings):
         if not findings:
             return f"No vulnerabilities found on {target}. System appears secure."
-            
+
+        # Fix — use "severity" not "risk_level"
         counts = {
-            "CRITICAL": sum(1 for f in findings if f.get("risk_level") == "CRITICAL"),
-            "HIGH": sum(1 for f in findings if f.get("risk_level") == "HIGH"),
-            "MEDIUM": sum(1 for f in findings if f.get("risk_level") == "MEDIUM"),
-            "LOW": sum(1 for f in findings if f.get("risk_level") == "LOW"),
+            "CRITICAL": sum(1 for f in findings if f.get("severity") == "CRITICAL"),
+            "HIGH": sum(1 for f in findings if f.get("severity") == "HIGH"),
+            "MEDIUM": sum(1 for f in findings if f.get("severity") == "MEDIUM"),
+            "LOW": sum(1 for f in findings if f.get("severity") == "LOW"),
         }
-        
+
         prompt = f"""
 You are a senior cybersecurity consultant writing an executive summary.
 Write exactly 3 paragraphs for a CEO — clear, business focused, zero technical jargon.
@@ -105,8 +112,25 @@ Paragraph 3: Recommended immediate actions
             print(f"Summary error: {e}")
             return f"Security assessment of {target} completed. {len(findings)} findings identified."
 
+
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
     ai = AIAnalyzer()
-    print("\n--- Running Empty Input Safety Check ---")
-    empty = ai.analyze("", "", "")
-    print(json.dumps(empty, indent=2))
+
+    print("\n--- Testing analyze() ---")
+    result = ai.analyze(
+        "SQL Injection",
+        "SQL error triggered on login form parameter",
+        "CRITICAL"
+    )
+    print(json.dumps(result, indent=2))
+
+    print("\n--- Testing executive_summary() ---")
+    findings = [
+        {"severity": "CRITICAL", "type": "SQL Injection"},
+        {"severity": "HIGH", "type": "XSS"},
+        {"severity": "MEDIUM", "type": "Missing Header"},
+    ]
+    summary = ai.executive_summary("https://example.com", findings)
+    print(summary)

@@ -27,3 +27,6 @@ test_*.py
 
 # Uploaded files
 uploads/
+git add .
+git commit -m "Added Verification Engine v2.0 - confidence scoring + chain detection"
+git push

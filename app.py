@@ -68,7 +68,7 @@ def init_db():
     conn.close()
     print("✅ MariaDB connected successfully!")
 
-def calculate_risk_score(findings):
+def calculate_risk_score(findings, ports=None):
     score = 0
     for f in findings:
         if f.get("severity") == "CRITICAL":
@@ -79,6 +79,13 @@ def calculate_risk_score(findings):
             score += 4
         elif f.get("severity") == "LOW":
             score += 1
+
+    # Add CVE scores from ports
+    if ports:
+        for port in ports:
+            cve_count = len(port.get("cves", []))
+            score += cve_count * 5
+
     return score
 
 @app.route("/")
@@ -377,9 +384,45 @@ def start_scan():
                 all_findings.append(f)                      
 
         # Calculate risk score and summary
-        risk_score = calculate_risk_score(all_findings)
-        summary = ai.executive_summary(target, all_findings)
+        # Add port CVE findings to summary
+        port_findings = []
+        for port in net_results.get("ports", []):
+            cves = port.get("cves", [])
+            if cves:
+                # Group ALL CVEs per port into ONE finding
+                cve_list = ", ".join([
+                    str(c.get("id", c)) if isinstance(c, dict)
+                    else str(c)
+                    for c in cves[:5]
+                ])
+                port_findings.append({
+                    "type": f"CVE in Port {port['port']} ({port.get('service', '')})",
+                    "severity": "HIGH",
+                    "detail": f"Port {port['port']} running {port.get('service', 'unknown')} {port.get('version', '')} has {len(cves)} known CVEs: {cve_list}",
+                    "evidence": f"Service: {port.get('service', '')} | Version: {port.get('version', '')} | CVEs: {len(cves)}",
+                    "url": f"http://{net_results.get('host', '')}"
+                })
+
+        # Calculate risk score and summary
+        risk_score = calculate_risk_score(
+            all_findings,
+            net_results.get("ports", [])
+        )
+        
+            
+            
+        
         # Generate KB security report
+        # Verification Engine — filter false positives + detect chains
+        from verification_engine import VerificationEngine
+        ve = VerificationEngine(target)
+        verified_results = ve.verify_all_findings(all_findings)
+        all_findings = verified_results["verified_findings"]
+        chains = verified_results["chains"]
+        summary = ai.executive_summary(
+            target,
+            all_findings + port_findings
+        )
         # Generate PoC and bug bounty report
         poc_gen = PoCGenerator(target)
         all_findings = poc_gen.generate_pocs_for_findings(all_findings)
@@ -387,7 +430,10 @@ def start_scan():
         reporter = BountyReport(target, "Ajeet Kumar")
         report_files = reporter.export_report(all_findings)
         from vulnerability_kb import generate_security_report
-        kb_report = generate_security_report(all_findings)
+        kb_report = generate_security_report(
+            all_findings,
+            net_results.get("ports", [])
+        )
         security_score = kb_report["security_score"]
         risk_level_kb = kb_report["risk_level"]
         recommendations = kb_report["recommendations"]
@@ -398,13 +444,16 @@ def start_scan():
             "web_findings": all_findings,
             "ports": net_results.get("ports", []),
             "summary": summary,
-            "total": len(all_findings),
+            "total": len(all_findings),  # now counted AFTER verification
             "risk_score": risk_score,
             "modules_run": modules,
             "security_score": security_score,
             "risk_level_kb": risk_level_kb,
             "recommendations": recommendations,
-            "bounty_reports": report_files
+            "bounty_reports": report_files,
+            "chains": chains,
+            "verification_stats": verified_results["stats"],
+            "port_findings_count": len(port_findings)
         }
 
         # Save results to MariaDB
@@ -466,19 +515,19 @@ def get_results(scan_id):
 
     results = json.loads(results_json)
 
-    risk_score = results.get("risk_score", 0)
-    if risk_score >= 20:
-        risk_color = "#ff4444"
-        risk_label = "CRITICAL RISK"
-    elif risk_score >= 10:
-        risk_color = "#ff8800"
-        risk_label = "HIGH RISK"
-    elif risk_score >= 5:
-        risk_color = "#ffcc00"
-        risk_label = "MEDIUM RISK"
-    else:
+    security_score = results.get("security_score", 100)
+    if security_score >= 80:
         risk_color = "#44ff44"
         risk_label = "LOW RISK"
+    elif security_score >= 60:
+        risk_color = "#ffcc00"
+        risk_label = "MEDIUM RISK"
+    elif security_score >= 40:
+        risk_color = "#ff8800"
+        risk_label = "HIGH RISK"
+    else:
+        risk_color = "#ff4444"
+        risk_label = "CRITICAL RISK"
 
     findings_html = ""
     for f in results.get("web_findings", []):
@@ -526,8 +575,9 @@ def get_results(scan_id):
         <h3>Target: {results["target"]}</h3>
         <p style="color:#64748b; font-size:13px">Modules run: {modules_html}</p>
         <p style="color:#5dcaa5">Total Findings: {results["total"]}</p>
-         Security Score: {results.get("security_score", 100)}/100 
-            — {results.get("risk_level_kb", "UNKNOWN")}
+        <p style="color:{risk_color}; font-size:22px; font-weight:bold">
+            Security Score: {results.get("security_score", 0)}/100
+            — {risk_label}
         </p>
         <div style="background:#0d1b2a; border:1px solid #1e3a5f; 
                     border-radius:8px; padding:16px; margin:10px 0">
@@ -537,9 +587,6 @@ def get_results(scan_id):
             {"".join([f'<p style="color:#94a3b8">• {r}</p>' 
                       for r in results.get("recommendations", [])])}
         </div>
-        <p style="color:{risk_color}; font-size:22px; font-weight:bold">
-            Risk Score: {risk_score} / 100 — {risk_label}
-        </p>
 
         <h2 style="color:#5dcaa5; border-bottom:1px solid #1e3a5f; padding-bottom:8px">
             Executive Summary

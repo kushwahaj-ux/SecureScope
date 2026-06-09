@@ -33,7 +33,16 @@ class FrontendAnalyzer:
         WHY: More pages = more JS files = more chances to find secrets
         """
         print(f"[*] Crawling website — max {max_pages} pages...")
-        to_visit = [self.target]
+        # Start with homepage + important paths to ensure diverse crawling
+        important_paths = [
+            '', '/about', '/contact', '/login', '/account',
+            '/cart', '/checkout', '/products', '/categories',
+            '/blog', '/faq', '/privacy', '/terms', '/sitemap.xml'
+        ]
+        to_visit = [self.target] + [
+            urljoin(self.target, path) 
+            for path in important_paths
+        ]
         base_domain = urlparse(self.target).netloc
 
         while to_visit and len(self.visited_pages) < max_pages:
@@ -50,8 +59,20 @@ class FrontendAnalyzer:
                 for link in soup.find_all("a", href=True):
                     full_url = urljoin(url, link["href"])
                     parsed = urlparse(full_url)
+                    # Skip fragment URLs — not real pages
+                    if parsed.fragment:
+                        continue
+                    # Skip non-HTTP URLs
+                    if parsed.scheme not in ['http', 'https']:
+                        continue
                     if parsed.netloc == base_domain and full_url not in self.visited_pages:
-                        to_visit.append(full_url)
+                        # Allow max 2 URLs with same path pattern
+                        same_path_count = sum(
+                            1 for u in to_visit + list(self.visited_pages)
+                            if urlparse(u).path == parsed.path
+                        )
+                        if same_path_count < 2:
+                            to_visit.append(full_url)
 
                 # Find all JavaScript files
                 for script in soup.find_all("script"):
@@ -402,6 +423,11 @@ class FrontendAnalyzer:
         test_url = "https://evil-test-domain-securescope.com"
 
         for page_url in list(self.visited_pages)[:5]:
+
+            for page_url in list(self.visited_pages)[:5]:
+                # Skip URLs with fragments — redirect testing invalid on these
+                if '#' in page_url:
+                    continue    
             try:
                 resp = self.session.get(page_url, timeout=5, verify=False)
                 page_content = resp.text.lower()
@@ -418,7 +444,8 @@ class FrontendAnalyzer:
                     )
                     if (resp.history and
                         "evil-test-domain-securescope" in resp.url and
-                        resp.url != page_url):
+                        resp.url != page_url and
+                        urlparse(resp.url).netloc == "evil-test-domain-securescope.com"):
                         self.findings.append({
                             "type": "Open Redirect",
                             "detail": f"Confirmed open redirect via '{param}' at {page_url}",
